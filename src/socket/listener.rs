@@ -5,10 +5,31 @@ use super::stream::ConnectedStream;
 use std::{marker::PhantomData, os::fd::OwnedFd};
 
 
-/// A listening socket ready to accept connections.
+/// A listening socket ready to accept incoming connections.
 ///
-/// Only exists for Stream sockets — you cannot listen on datagrams.
-/// The type parameter D tracks which address family (Ipv4, Ipv6, Unix).
+/// # Typestate
+///
+/// `Listener<D>` represents a socket that has successfully completed:
+///
+/// ```text
+/// socket() → bind() → listen()
+/// ```
+///
+/// At this point:
+/// - The socket is guaranteed to be a **Stream** socket.
+/// - Datagram sockets cannot reach this state.
+/// - The address family (`Ipv4`, `Ipv6`, `Unix`) is tracked by `D`.
+///
+/// This type exists solely to enforce that only valid operations
+/// (`accept`, `accept_nonblocking`) are callable at this stage.
+///
+/// # Blocking vs Non-Blocking
+///
+/// Whether calls block is **not determined by the method name**.
+/// It is determined by the `O_NONBLOCK` flag on the underlying file descriptor.
+///
+/// The methods below expose *different semantic guarantees* on top of
+/// that kernel behavior.
 pub struct Listener<D: Domain> {
     fd: OwnedFd,
     _marker: PhantomData<D>,
@@ -106,9 +127,12 @@ impl<D: Domain> Listener<D>
 where
     D::Addr: FromSockAddr,
 {
-    /// Accepts a connection, returning the client's address.
+    /// Accepts a connection and returns the peer address.
     ///
-    /// Use this when you need to know who connected (logging, rate limiting, etc.).
+    /// Semantics are identical to [`accept()`], with the addition that
+    /// the client's address is returned.
+    ///
+    /// This method **inherits blocking behavior** from the listener fd.
     pub fn accept_with_addr(&self) -> std::io::Result<(ConnectedStream<D>, D::Addr)> {
         use std::os::fd::FromRawFd;
         let mut storage: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
@@ -276,7 +300,7 @@ impl<D: Domain> BoundSocket<D, Stream> {
 }
 /*
 The signature impl<D: Domain> BoundSocket<D, Stream>
-means: "this impl block only applies when T = Stream". 
+means: "this impl block only applies when T = Stream".
 If someone has a BoundSocket<Ipv4, Datagram>,they cannot call .listen()
  — the compiler will say "method not found".
 */

@@ -7,7 +7,7 @@ mod bound;
 mod builder;
 mod pending;
 
-pub use self::listener::Listener;
+pub use self::listener::{Listener,AcceptResult};
 pub use self::raw::RawSocket;
 pub use self::stream::{ConnectedStream,Shutdown};
 pub use self::bound::BoundSocket;
@@ -16,7 +16,7 @@ pub use self::options::{set_reuse_addr, set_reuse_port, set_tcp_nodelay, set_lin
 						set_recv_buffer_size, set_keepalive, set_keepalive_count,
 						set_keepalive_idle, set_keepalive_interval, set_send_buffer_size,
 						set_tcp_cork, set_tcp_quickack, set_tcp_fastopen,
-						get_tcp_info, TcpInfo,
+						get_tcp_info, TcpInfo, 
 						splice, SPLICE_F_MOVE, SPLICE_F_NONBLOCK, SPLICE_F_MORE,
 						send_fd, recv_fd};
 pub use self::pending::PendingConnect;

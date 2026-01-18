@@ -4,7 +4,8 @@ mod error;
 
 pub use self::error::{IoError, SocketError, errno};
 pub use self::addr::{Domain, Ipv4, Ipv6, Unix, SocketAddrV4, SocketAddrV6, UnixAddr};
-pub use self::socket::{MsgResult,Shutdown, SockType, Stream, ListenerBuilder, ConnectorBuilder,
+pub use self::socket::{AcceptResult, MsgResult,Shutdown, SockType, Stream, ListenerBuilder,
+					   ConnectorBuilder,
 					   set_recv_buffer_size,
 					   DatagramBuilder, BufferConfig, ReuseConfig, TcpConfig, KeepaliveConfig,
 					   Datagram, RawSocket, BoundSocket,
