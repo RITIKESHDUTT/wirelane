@@ -31,10 +31,31 @@ impl<D: Domain> Listener<D> {
         use std::os::fd::AsRawFd;
         self.fd.as_raw_fd()
     }
-    /// Accepts a connection from the listening socket.
+    /// Accepts an incoming connection **using blocking semantics**.
     ///
-    /// Blocks until a client connects.
-    /// Returns a connected stream ready for read/write.
+    /// # Guarantees
+    ///
+    /// When this function returns `Ok(ConnectedStream<D>)`, the kernel guarantees:
+    ///
+    /// - The TCP handshake has completed
+    /// - The returned socket is connected
+    /// - The socket is **ready for read/write**
+    /// - A subsequent `read()` will block until data arrives
+    ///
+    /// This strong postcondition is only valid when:
+    /// - The listener file descriptor is **blocking**
+    /// - Or readiness has already been ensured by the caller
+    ///
+    /// # Failure Modes
+    ///
+    /// - Returns an error if the syscall fails
+    /// - May return `EAGAIN` if the listener is non-blocking
+    ///
+    /// # Why this returns `ConnectedStream<D>`
+    ///
+    /// Blocking `accept()` delegates waiting to the kernel.
+    /// Because the kernel blocks internally, this function can return
+    /// a fully usable `ConnectedStream` without ambiguity.
     pub fn accept(&self) -> std::io::Result<ConnectedStream<D>> {
         use std::os::fd::FromRawFd;
         let fd = unsafe {
@@ -53,7 +74,17 @@ impl<D: Domain> Listener<D> {
         let fd = unsafe { OwnedFd::from_raw_fd(fd) };
         Ok(ConnectedStream::from_fd(fd))
     }
-
+    
+    /// Sets or clears the `O_NONBLOCK` flag on the listener socket.
+    ///
+    /// # Important
+    ///
+    /// This affects:
+    /// - Whether `accept()` blocks
+    /// - Whether `accept_nonblocking()` returns `WouldBlock`
+    ///
+    /// This does **not** change typestate.
+    /// Blocking behavior is a runtime property, not a state transition.
     pub fn set_nonblocking(&self, nonblocking: bool) -> std::io::Result<()> {
         let flags = unsafe { libc::fcntl(self.as_raw_fd(), libc::F_GETFL) };
         if flags == -1 {
@@ -249,3 +280,30 @@ means: "this impl block only applies when T = Stream".
 If someone has a BoundSocket<Ipv4, Datagram>,they cannot call .listen()
  — the compiler will say "method not found".
 */
+/// Result of a non-blocking accept attempt.
+///
+/// This enum does **not** represent socket state.
+/// It represents the **outcome of a syscall probe**.
+///
+/// The listener remains in the `Listener<D>` state in all cases.
+pub enum AcceptResult<D: Domain>
+where
+    D::Addr: FromSockAddr,
+{
+    /// A connection was accepted.
+    ///
+    /// The socket is connected but **may not yet be readable**.
+    /// Callers must handle `read()` returning `WouldBlock`.
+    Connection(ConnectedStream<D>, D::Addr),
+    
+    /// No connection is ready at this time.
+    ///
+    /// This is not an error.
+    /// The caller must wait for readiness or retry.
+    WouldBlock,
+    
+    /// The accept syscall was interrupted by a signal.
+    ///
+    /// Safe to retry immediately.
+    Interrupted,
+}
