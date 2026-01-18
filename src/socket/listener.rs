@@ -108,6 +108,85 @@ where
 
         Ok((stream, addr))
     }
+    
+    
+    /// Attempts to accept a connection **without blocking**.
+    ///
+    /// # Semantics
+    ///
+    /// This method **never blocks**.
+    /// It reports the kernel's current state explicitly.
+    ///
+    /// Possible outcomes:
+    ///
+    /// - `AcceptResult::Connection`
+    ///   - A connection was accepted
+    ///   - The returned socket is connected
+    ///   - **Read/write readiness is NOT guaranteed**
+    ///
+    /// - `AcceptResult::WouldBlock`
+    ///   - No pending connections exist
+    ///   - Caller must wait for readiness (epoll / io_uring / retry)
+    ///
+    /// - `AcceptResult::Interrupted`
+    ///   - The syscall was interrupted by a signal
+    ///   - Safe to retry immediately
+    ///
+    /// # Critical Difference from `accept()`
+    ///
+    /// A successful non-blocking accept **does NOT guarantee**
+    /// that data is available to read.
+    ///
+    /// Calling `read()` immediately may return `EAGAIN`.
+    ///
+    /// # Correct Usage
+    ///
+    /// After receiving `Connection`:
+    ///
+    /// - Wait for read readiness **or**
+    /// - Retry `read()` on `WouldBlock`
+    ///
+    /// # Why this does NOT return `ConnectedStream<D>` directly
+    ///
+    /// Non-blocking accept has a weaker postcondition.
+    /// Returning `ConnectedStream<D>` alone would incorrectly imply
+    /// read/write readiness.
+    pub fn accept_nonblocking(&self) -> std::io::Result<AcceptResult<D>> {
+        use std::os::fd::FromRawFd;
+        
+        let mut storage: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
+        let mut len = std::mem::size_of::<libc::sockaddr_storage>() as libc::socklen_t;
+        
+        let fd = unsafe {
+            libc::accept4(
+                self.as_raw_fd(),
+                &mut storage as *mut _ as *mut libc::sockaddr,
+                &mut len,
+                libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC,
+            )
+        };
+        
+        if fd == -1 {
+            let err = errno();
+            return match err {
+                libc::EAGAIN => Ok(AcceptResult::WouldBlock),
+                libc::EINTR => Ok(AcceptResult::Interrupted),
+                _ => Err(SocketError::Accept { errno: err }.into()),
+            };
+        }
+        
+        let fd = unsafe { OwnedFd::from_raw_fd(fd) };
+        let stream = ConnectedStream::from_fd(fd);
+        
+        let addr = unsafe {
+            D::Addr::from_sockaddr(&storage as *const _ as *const libc::sockaddr, len)
+                .ok_or_else(|| SocketError::InvalidAddress {
+                    reason: "invalid client address",
+                })?
+        };
+        
+        Ok(AcceptResult::Connection(stream, addr))
+    }
 }
 
 impl<D: Domain> std::os::fd::AsRawFd for Listener<D> {
